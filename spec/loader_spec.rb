@@ -207,4 +207,24 @@ describe "Sensu::Settings::Loader" do
     end
     expect(handler[:type]).to eq("set")
   end
+
+  it "can load settings from etcd" do
+    cl = Etcd.client
+    cl.delete("/sensu-test", recursive: true) rescue ""
+
+    @loader.load_etcd("http://localhost:4001", "/sensu-test")
+
+    expect(@loader.checks.length).to eq(0)
+    expect(@loader.handlers.length).to eq(0)
+
+    cl.set("/sensu-test/checks/foo/extension", value: "true")
+    cl.set("/sensu-test/checks/foo/subscribers", value: "foo,bar")
+    cl.set("/sensu-test/checks/foo/interval", value: "30")
+
+    @loader.load_etcd("http://localhost:4001", "/sensu-test")
+    expect(@loader.checks.length).to eq(1)
+    expect(@loader.checks[0]).to eq(
+      name: "foo", "subscribers" => ["foo", "bar"], "extension" => {}, "interval" => 30
+    )
+  end
 end
