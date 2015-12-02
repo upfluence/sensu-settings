@@ -2,6 +2,8 @@ require "sensu/settings/validator"
 require "multi_json"
 require "tmpdir"
 require "socket"
+require "uri"
+require "etcd"
 
 module Sensu
   module Settings
@@ -69,6 +71,87 @@ module Sensu
       # @return [Object] value for key.
       def [](key)
         to_hash[key]
+      end
+
+      # Load settings from an etcd namespace.
+      #
+      # @param key[String, String]
+      def load_etcd(url, namespace)
+        uri = URI.parse(url)
+        @etcd_client = Etcd.client(host: uri.host, port: uri.port)
+        @etcd_namespace = namespace
+
+        load_checks_etcd
+        load_handlers_etcd
+      end
+
+      def load_handlers_etcd
+        resp = @etcd_client.get(
+          "#{@etcd_namespace}/handlers",
+          recursive: true
+        ).node
+
+        resp.children.each do |handler|
+          handler_name = handler.key.split('/').last
+          @settings[:handlers][handler_name] ||= {}
+
+          check.children.each do |setting|
+            setting_name = setting.key.split('/').last
+            @settings[:handlers][handler_name][setting_name] ||= {}
+
+            case setting_name
+            when "handle_flapping"
+              @settings[:handlers][handler_name][setting_name] = \
+                setting.value == "true"
+            when "timeout", "port"
+              @settings[:handlers][handler_name][setting_name] = setting.value.to_i
+            when "severities", "filters", "handlers"
+              @settings[:handlers][handler_name][setting_name] = \
+                setting.value.split(',')
+            when "subdue", "socket", "pipe", "options"
+              @settings[:handlers][handler_name][setting_name] = \
+                JSON.parse(setting.value)
+            default
+              @settings[:handlers][handler_name][setting_name] = setting.value
+            end
+          end
+        end
+      rescue Etcd::KeyNotFound
+      end
+
+      def load_checks_etcd
+        resp = @etcd_client.get(
+          "#{@etcd_namespace}/checks",
+          recursive: true
+        ).node
+
+        resp.children.each do |check|
+          check_name = check.key.split('/').last
+          @settings[:checks][check_name] ||= {}
+
+          check.children.each do |setting|
+            setting_name = setting.key.split('/').last
+            @settings[:checks][check_name][setting_name] ||= {}
+
+            case setting_name
+            when "standalone", "publish", "handle", "aggregate"
+              @settings[:checks][check_name][setting_name] = \
+                setting.value == "true"
+            when "high_flap_threshold", "low_flap_threshold", "ttl", \
+              "timeout", "interval"
+              @settings[:checks][check_name][setting_name] = setting.value.to_i
+            when "subscribers", "handlers"
+              @settings[:checks][check_name][setting_name] = \
+                setting.value.split(',')
+            when "subdue"
+              @settings[:checks][check_name][setting_name] = \
+                JSON.parse(setting.value)
+            default
+              @settings[:checks][check_name][setting_name] = setting.value
+            end
+          end
+        end
+      rescue Etcd::KeyNotFound
       end
 
       # Load settings from the environment.

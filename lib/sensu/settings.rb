@@ -2,6 +2,8 @@ require "sensu/settings/loader"
 
 module Sensu
   module Settings
+    DEFAULT_ETCD_NAMESPCE = "/sensu"
+
     class << self
       # Load Sensu settings.
       #
@@ -23,6 +25,12 @@ module Sensu
           options[:config_dirs].each do |directory|
             @loader.load_directory(directory)
           end
+        end
+        if options[:etcd_url]
+          @loader.load_etcd(
+            options[:etcd_url],
+            options[:etcd_namespace] || DEFAULT_ETCD_NAMESPCE
+          )
         end
         @loader.set_env!
         @loader
